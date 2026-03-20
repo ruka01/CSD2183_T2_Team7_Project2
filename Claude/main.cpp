@@ -175,6 +175,7 @@ int main(int argc, char* argv[]) {
         };
     replace_marker("%%INPUT_CSV%%", input_data);
     replace_marker("%%OUTPUT_CSV%%", output_data);
+    replace_marker("%%FILENAME%%", input_path.filename().string());
 
     std::string view_path = (folder / "View.html").string();
     std::ofstream out(view_path);

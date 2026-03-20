@@ -38,6 +38,7 @@ static const char VIEW_HTML_TEMPLATE[] =
 "<header>\n"
 "  <h1>POLY/SIMP</h1>\n"
 "  <span>Polygon Simplifier &mdash; Before / After</span>\n"
+"  <span style=\"margin-left:auto; color:var(--accent); opacity:0.7; font-size:0.7rem;\">%%FILENAME%%</span>\n"
 "</header>\n"
 "<div id=\"statusBar\">\n"
 "  <div class=\"stat\"><div class=\"dot\" style=\"background:var(--before)\"></div>\n"
