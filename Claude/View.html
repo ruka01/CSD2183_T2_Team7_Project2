@@ -2,157 +2,421 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Polygon Before/After Viewer</title>
+  <title>Polygon Simplifier — Before / After</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
   <style>
-    body { font-family: Arial, sans-serif; }
-    .row { display: flex; gap: 20px; }
-    .panel { display: flex; flex-direction: column; align-items: center; }
-    canvas { border: 1px solid black; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f0f11;
+      --surface:  #18181c;
+      --border:   #2a2a32;
+      --accent:   #c8f135;
+      --dim:      #555566;
+      --text:     #e8e8f0;
+      --muted:    #888899;
+      --before:   #4da9ff;
+      --after:    #ff6b6b;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 28px 40px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+    }
+
+    header h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+    }
+
+    header span {
+      font-size: 0.75rem;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    /* ── Status bar ── */
+    #statusBar {
+      padding: 12px 40px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+
+    #statusBar .stat { display: flex; gap: 6px; align-items: center; }
+    #statusBar .stat .label { color: var(--dim); }
+    #statusBar .stat .val   { color: var(--text); font-weight: 500; }
+    #statusBar .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    #statusBar .dot.before { background: var(--before); }
+    #statusBar .dot.after  { background: var(--after); }
+
+    #autoStatus {
+      margin-left: auto;
+      font-size: 0.7rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    #autoStatus.ok  { color: var(--accent); }
+    #autoStatus.err { color: #ff6b6b; }
+
+    /* ── Manual load (fallback) ── */
+    #manualLoad {
+      padding: 12px 40px;
+      background: #13131a;
+      border-bottom: 1px solid var(--border);
+      display: none;
+      gap: 24px;
+      align-items: center;
+      font-size: 0.72rem;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+    #manualLoad.visible { display: flex; }
+
+    .file-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .file-label .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .file-label input[type="file"] { display: none; }
+    .file-label .btn {
+      padding: 4px 12px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.7rem;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .file-label .btn:hover { border-color: var(--accent); }
+    .file-label .fname { color: var(--dim); font-size: 0.68rem; }
+
+    /* ── Canvas panels ── */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+    }
+
+    .panel {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      padding: 24px;
+      gap: 12px;
+    }
+    .panel:first-child { border-right: 1px solid var(--border); }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .panel-header .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .panel-header h2 {
+      font-family: 'Syne', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .panel-header .vcount {
+      margin-left: auto;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    .panel-header .vcount span { color: var(--text); }
+
+    canvas {
+      width: 100%;
+      aspect-ratio: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: block;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      position: absolute;
+      inset: 60px 24px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--dim);
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
-  <h2>Polygon Before / After Comparison</h2>
 
-  <div>
-    <label>Before CSV: <input type="file" id="beforeFile" /></label>
-    <label style="margin-left:20px;">After CSV: <input type="file" id="afterFile" /></label>
+<header>
+  <h1>POLY/SIMP</h1>
+  <span>Polygon Simplifier — Before / After</span>
+</header>
+
+<div id="statusBar">
+  <div class="stat">
+    <div class="dot before"></div>
+    <span class="label">before</span>
+    <span class="val" id="statBefore">—</span>
   </div>
-
-  <br>
-
-  <div class="row">
-    <div class="panel">
-      <h3>Before</h3>
-      <canvas id="beforeCanvas" width="600" height="600"></canvas>
-    </div>
-
-    <div class="panel">
-      <h3>After</h3>
-      <canvas id="afterCanvas" width="600" height="600"></canvas>
-    </div>
+  <div class="stat">
+    <div class="dot after"></div>
+    <span class="label">after</span>
+    <span class="val" id="statAfter">—</span>
   </div>
+  <div class="stat">
+    <span class="label">reduction</span>
+    <span class="val" id="statReduction">—</span>
+  </div>
+  <div id="autoStatus"></div>
+</div>
 
-  <script>
-    let beforeRings = null;
-    let afterRings = null;
+<div id="manualLoad">
+  <label class="file-label">
+    <div class="dot" style="background:var(--before)"></div>
+    <span>Before CSV</span>
+    <div class="btn">Choose file</div>
+    <input type="file" id="beforeFile" accept=".csv">
+    <span class="fname" id="beforeFname">no file</span>
+  </label>
+  <label class="file-label">
+    <div class="dot" style="background:var(--after)"></div>
+    <span>After CSV</span>
+    <div class="btn">Choose file</div>
+    <input type="file" id="afterFile" accept=".csv">
+    <span class="fname" id="afterFname">no file</span>
+  </label>
+</div>
 
-    document.getElementById("beforeFile").addEventListener("change", e => {
-      loadCSV(e.target.files[0], rings => {
-        beforeRings = rings;
-        redraw();
-      });
-    });
+<main>
+  <div class="panel">
+    <div class="panel-header">
+      <div class="dot" style="background:var(--before)"></div>
+      <h2>Before</h2>
+      <span class="vcount">vertices: <span id="vcBefore">—</span></span>
+    </div>
+    <canvas id="beforeCanvas" width="800" height="800"></canvas>
+    <div class="empty-state" id="emptyBefore">awaiting input.csv</div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">
+      <div class="dot" style="background:var(--after)"></div>
+      <h2>After</h2>
+      <span class="vcount">vertices: <span id="vcAfter">—</span></span>
+    </div>
+    <canvas id="afterCanvas" width="800" height="800"></canvas>
+    <div class="empty-state" id="emptyAfter">awaiting output.csv</div>
+  </div>
+</main>
 
-    document.getElementById("afterFile").addEventListener("change", e => {
-      loadCSV(e.target.files[0], rings => {
-        afterRings = rings;
-        redraw();
-      });
-    });
+<script>
+  let beforeRings = null;
+  let afterRings  = null;
 
-    function loadCSV(file, callback) {
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function() {
-        callback(parseCSV(reader.result));
+  // ── Auto-load input.csv and output.csv from same folder ──────────────────
+  async function autoLoad() {
+    const status = document.getElementById('autoStatus');
+    let loadedCount = 0;
+
+    async function fetchCSV(filename) {
+      const res = await fetch(filename);
+      if (!res.ok) throw new Error(`${filename} not found (${res.status})`);
+      return res.text();
+    }
+
+    try {
+      const [beforeText, afterText] = await Promise.all([
+        fetchCSV('input.csv'),
+        fetchCSV('output.csv')
+      ]);
+      beforeRings = parseCSV(beforeText);
+      afterRings  = parseCSV(afterText);
+      status.textContent = '● auto-loaded';
+      status.className = 'ok';
+      redraw();
+    } catch (err) {
+      // If fetch fails (e.g. opened as file:// without a server, or files missing)
+      // fall back to manual file pickers
+      status.textContent = 'manual mode — ' + err.message;
+      status.className = 'err';
+      document.getElementById('manualLoad').classList.add('visible');
+    }
+  }
+
+  autoLoad();
+
+  // ── Manual file pickers (fallback) ───────────────────────────────────────
+  document.getElementById('beforeFile').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    document.getElementById('beforeFname').textContent = f.name;
+    readFile(f, text => { beforeRings = parseCSV(text); redraw(); });
+  });
+
+  document.getElementById('afterFile').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    document.getElementById('afterFname').textContent = f.name;
+    readFile(f, text => { afterRings = parseCSV(text); redraw(); });
+  });
+
+  function readFile(file, cb) {
+    const r = new FileReader();
+    r.onload = () => cb(r.result);
+    r.readAsText(file);
+  }
+
+  // ── CSV parsing ───────────────────────────────────────────────────────────
+  function parseCSV(text) {
+    const lines = text.trim().split(/\r?\n/);
+    const rings = {};
+    for (let i = 1; i < lines.length; i++) {
+      const p = lines[i].split(',');
+      if (p.length < 4) continue;
+      const id = parseInt(p[0], 10);
+      const x  = parseFloat(p[2]);
+      const y  = parseFloat(p[3]);
+      if (isNaN(id) || isNaN(x) || isNaN(y)) continue;
+      if (!rings[id]) rings[id] = [];
+      rings[id].push({ x, y });
+    }
+    return rings;
+  }
+
+  function countVerts(rings) {
+    if (!rings) return 0;
+    return Object.values(rings).reduce((s, r) => s + r.length, 0);
+  }
+
+  // ── Stats bar ─────────────────────────────────────────────────────────────
+  function updateStats() {
+    const nb = countVerts(beforeRings);
+    const na = countVerts(afterRings);
+    document.getElementById('statBefore').textContent    = nb || '—';
+    document.getElementById('statAfter').textContent     = na || '—';
+    document.getElementById('vcBefore').textContent      = nb || '—';
+    document.getElementById('vcAfter').textContent       = na || '—';
+    if (nb && na) {
+      const pct = (((nb - na) / nb) * 100).toFixed(1);
+      document.getElementById('statReduction').textContent = `${pct}%`;
+    } else {
+      document.getElementById('statReduction').textContent = '—';
+    }
+  }
+
+  // ── Draw ──────────────────────────────────────────────────────────────────
+  function getBounds(sets) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const rings of sets) {
+      if (!rings) continue;
+      for (const ring of Object.values(rings))
+        for (const p of ring) {
+          if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+          if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+        }
+    }
+    if (!isFinite(minX)) { minX = minY = 0; maxX = maxY = 1; }
+    return { minX, minY, maxX, maxY };
+  }
+
+  function redraw() {
+    updateStats();
+    const bounds = getBounds([beforeRings, afterRings]);
+    drawPanel('beforeCanvas', 'emptyBefore', beforeRings, bounds, getComputedStyle(document.documentElement).getPropertyValue('--before').trim());
+    drawPanel('afterCanvas',  'emptyAfter',  afterRings,  bounds, getComputedStyle(document.documentElement).getPropertyValue('--after').trim());
+  }
+
+  function drawPanel(canvasId, emptyId, rings, bounds, accentColor) {
+    const canvas = document.getElementById(canvasId);
+    const empty  = document.getElementById(emptyId);
+    const ctx    = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    if (!rings) { empty.style.display = 'flex'; return; }
+    empty.style.display = 'none';
+
+    const pad = 50;
+    const w = Math.max(bounds.maxX - bounds.minX, 1e-9);
+    const h = Math.max(bounds.maxY - bounds.minY, 1e-9);
+    const scale = Math.min((W - 2*pad) / w, (H - 2*pad) / h);
+
+    function mp(p) {
+      return {
+        x: pad + (p.x - bounds.minX) * scale,
+        y: H - (pad + (p.y - bounds.minY) * scale)
       };
-      reader.readAsText(file);
     }
 
-    function parseCSV(text) {
-      const lines = text.trim().split(/\r?\n/);
-      const rings = {};
-      for (let i = 1; i < lines.length; ++i) {
-        const parts = lines[i].split(",");
-        if (parts.length < 4) continue;
-        const ringId = parseInt(parts[0], 10);
-        const x = parseFloat(parts[2]);
-        const y = parseFloat(parts[3]);
-        if (!rings[ringId]) rings[ringId] = [];
-        rings[ringId].push({ x, y });
-      }
-      return rings;
+    const ids = Object.keys(rings).map(Number).sort((a,b) => a-b);
+
+    // Fill with even-odd rule for holes
+    ctx.save();
+    ctx.beginPath();
+    for (const id of ids) {
+      const ring = rings[id];
+      if (!ring.length) continue;
+      const s = mp(ring[0]);
+      ctx.moveTo(s.x, s.y);
+      for (let i = 1; i < ring.length; i++) { const m = mp(ring[i]); ctx.lineTo(m.x, m.y); }
+      ctx.closePath();
     }
+    ctx.fillStyle = accentColor + '18';
+    ctx.fill('evenodd');
+    ctx.restore();
 
-    function getBounds(allRingSets) {
-      let minX = Infinity, minY = Infinity;
-      let maxX = -Infinity, maxY = -Infinity;
+    // Draw edges + vertices
+    for (let idx = 0; idx < ids.length; idx++) {
+      const ring = rings[ids[idx]];
+      if (!ring.length) continue;
 
-      for (const rings of allRingSets) {
-        if (!rings) continue;
-        for (const ring of Object.values(rings)) {
-          for (const p of ring) {
-            minX = Math.min(minX, p.x);
-            minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x);
-            maxY = Math.max(maxY, p.y);
-          }
-        }
+      ctx.beginPath();
+      for (let i = 0; i < ring.length; i++) {
+        const m = mp(ring[i]);
+        i === 0 ? ctx.moveTo(m.x, m.y) : ctx.lineTo(m.x, m.y);
       }
+      ctx.closePath();
+      ctx.strokeStyle = idx === 0 ? accentColor : '#ff9f43';
+      ctx.lineWidth   = idx === 0 ? 2 : 1.5;
+      ctx.stroke();
 
-      if (!isFinite(minX)) {
-        minX = minY = 0;
-        maxX = maxY = 1;
-      }
-
-      return { minX, minY, maxX, maxY };
-    }
-
-    function redraw() {
-      const bounds = getBounds([beforeRings, afterRings]);
-      draw("beforeCanvas", beforeRings, bounds);
-      draw("afterCanvas", afterRings, bounds);
-    }
-
-    function draw(canvasId, rings, bounds) {
-      const canvas = document.getElementById(canvasId);
-      const ctx = canvas.getContext("2d");
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      if (!rings) return;
-
-      const pad = 40;
-      const width = Math.max(bounds.maxX - bounds.minX, 1e-9);
-      const height = Math.max(bounds.maxY - bounds.minY, 1e-9);
-      const scale = Math.min(
-        (canvas.width - 2 * pad) / width,
-        (canvas.height - 2 * pad) / height
-      );
-
-      function mapPoint(p) {
-        return {
-          x: pad + (p.x - bounds.minX) * scale,
-          y: canvas.height - (pad + (p.y - bounds.minY) * scale)
-        };
-      }
-
-      const ringIds = Object.keys(rings).map(Number).sort((a, b) => a - b);
-
-      for (let idx = 0; idx < ringIds.length; ++idx) {
-        const ring = rings[ringIds[idx]];
-        if (ring.length === 0) continue;
-
+      for (const p of ring) {
+        const m = mp(p);
         ctx.beginPath();
-        for (let i = 0; i < ring.length; ++i) {
-          const m = mapPoint(ring[i]);
-          if (i === 0) ctx.moveTo(m.x, m.y);
-          else ctx.lineTo(m.x, m.y);
-        }
-        ctx.closePath();
-
-        ctx.strokeStyle = idx === 0 ? "blue" : "red";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        for (let i = 0; i < ring.length; ++i) {
-          const m = mapPoint(ring[i]);
-          ctx.beginPath();
-          ctx.arc(m.x, m.y, 3, 0, Math.PI * 2);
-          ctx.fillStyle = "black";
-          ctx.fill();
-        }
+        ctx.arc(m.x, m.y, idx === 0 ? 3.5 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = idx === 0 ? accentColor : '#ff9f43';
+        ctx.fill();
       }
     }
-  </script>
+  }
+</script>
 </body>
 </html>

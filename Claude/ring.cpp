@@ -198,8 +198,7 @@ bool Ring::compute_candidate(Vertex* B) {
 
     // Areal displacement = area of the two "cut-off" triangles in the
     // symmetric difference between old polyline A→B→C→D and new A→E→D.
-    double disp = std::abs(tri_signed_area(A->x, A->y, B->x, B->y, B->ex, B->ey))
-                + std::abs(tri_signed_area(C->x, C->y, D->x, D->y, B->ex, B->ey));
+    double disp = std::abs(S_quad);
 
     B->areal_displacement = disp;
     return true;
