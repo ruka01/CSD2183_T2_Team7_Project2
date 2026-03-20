@@ -14,11 +14,6 @@ static double tri_signed_area(double ax, double ay,
     return 0.5 * ((bx - ax) * (cy - ay) - (cx - ax) * (by - ay));
 }
 
-// Squared distance between two points
-static double dist2(double ax, double ay, double bx, double by) {
-    return (bx-ax)*(bx-ax) + (by-ay)*(by-ay);
-}
-
 // ---------------------------------------------------------------------------
 // Ring::append
 // ---------------------------------------------------------------------------
@@ -78,18 +73,13 @@ double Ring::signed_area() const {
 //
 // Roles: A = B->prev, B = B, C = B->next, D = B->next->next
 //
-// The APSC formula (Kronenfeld et al. 2020):
-//   E lies on segment A→D such that the signed area of triangle A→E→D
-//   equals the signed area of the quadrilateral A→B→C→D.
+// APSC formula: find E on the area-preserving constraint line
+//   area(AED) = S_quad = area(A,B,C,D)
+// that minimises the areal displacement |tri(A,B,E)| + |tri(C,D,E)|.
 //
-//   Let S = signed_area(A,B,C) + signed_area(A,C,D)  [area of the quad]
-//   Let base = |AD|^2
-//   The parameter t (0..1 along AD) is:
-//       t = 2*S / cross(AD, AD_perp)  ... see paper for full derivation.
-//
-// TODO: fill in the exact formula from the paper once you have access to it.
-// The stub below stores a placeholder displacement of 1e18 (will never be
-// selected) so that the rest of the pipeline can be tested first.
+// The constraint is linear in E, defining a line in 2D.
+// Both |tri(A,B,E)| and |tri(C,D,E)| are |linear in t| along that line,
+// so the optimal t is at one of the two sign-change breakpoints.
 // ---------------------------------------------------------------------------
 bool Ring::compute_candidate(Vertex* B) {
     assert(B && B->ring_id == id);
@@ -106,13 +96,6 @@ bool Ring::compute_candidate(Vertex* B) {
     Vertex* A = B->prev;
     Vertex* C = B->next;
     Vertex* D = C->next;
-
-    // Degenerate: A and D coincide
-    if (dist2(A->x, A->y, D->x, D->y) < 1e-15) {
-        B->areal_displacement = 1e18;
-        B->invalid = true;
-        return false;
-    }
 
     // ------------------------------------------------------------------
     // APSC formula (Kronenfeld et al. 2020)
@@ -168,40 +151,61 @@ bool Ring::compute_candidate(Vertex* B) {
     double S_quad = tri_signed_area(A->x, A->y, B->x, B->y, C->x, C->y)
                   + tri_signed_area(A->x, A->y, C->x, C->y, D->x, D->y);
 
-    double adx    = D->x - A->x;
-    double ady    = D->y - A->y;
-    double ad_len = std::sqrt(adx*adx + ady*ady);
+    // The constraint for area preservation: area(AED) = S_quad
+    // Expanded: 0.5 * ((ex - A.x)*(D.y - A.y) - (ey - A.y)*(D.x - A.x)) = S_quad
+    // => p*ex + q*ey = RHS   where p = D.y-A.y, q = -(D.x-A.x)
+    double p   = D->y - A->y;
+    double q   = -(D->x - A->x);
+    double RHS = 2.0 * S_quad + p * A->x + q * A->y;
+    double pq2 = p*p + q*q;   // = |AD|^2
 
-    // Midpoint of B and C (the two vertices being removed)
-    double mx = (B->x + C->x) * 0.5;
-    double my = (B->y + C->y) * 0.5;
+    if (pq2 < 1e-15) {
+        B->areal_displacement = 1e18;
+        B->invalid = true;
+        return false;
+    }
 
-    // Project midpoint M onto the line A→D to get foot F
-    double ad2 = adx*adx + ady*ady;
-    double t   = ((mx - A->x)*adx + (my - A->y)*ady) / ad2;
-    double fx  = A->x + t*adx;
-    double fy  = A->y + t*ady;
+    // Parameterize all valid E points on the constraint line:
+    //   E(t) = E0 + t * (tx, ty)
+    // where E0 = foot from origin to constraint line, tangent = (q,-p)/|pq|
+    double pq_len = std::sqrt(pq2);
+    double tx = q / pq_len;
+    double ty = -p / pq_len;
+    double t0 = RHS / pq2;
+    double e0x = t0 * p;
+    double e0y = t0 * q;
 
-    // Left-hand unit normal of A→D (rotate 90° CCW)
-    double nx = -ady / ad_len;
-    double ny =  adx / ad_len;
+    // f(t) = |tri(A,B,E(t))| + |tri(C,D,E(t))|
+    // Each tri is linear in t: tri(A,B,E(t)) = c1_0 + k1*t
+    // f(t) is piecewise linear; minimum is at one of the two breakpoints
+    // (where each term changes sign) or at t=0.
+    double k1 = 0.5 * ((B->x - A->x) * ty - (B->y - A->y) * tx);
+    double k2 = 0.5 * ((D->x - C->x) * ty - (D->y - C->y) * tx);
+    double c1  = tri_signed_area(A->x, A->y, B->x, B->y, e0x, e0y);
+    double c2  = tri_signed_area(C->x, C->y, D->x, D->y, e0x, e0y);
 
-    // area(A, F+h*n, D) = area(A,F,D) - 0.5 * h * |AD|
-    // (derivation: shifting F by h along the left-normal reduces signed area)
-    // Set equal to S_quad and solve for h:
-    //   h = 2 * (area(A,F,D) - S_quad) / |AD|
-    double area_AFD = tri_signed_area(A->x, A->y, fx, fy, D->x, D->y);
-    double h        = 2.0 * (area_AFD - S_quad) / ad_len;
+    auto f = [&](double t) {
+        return std::abs(c1 + k1*t) + std::abs(c2 + k2*t);
+    };
 
-    B->ex = fx + h * nx;
-    B->ey = fy + h * ny;
+    // Breakpoints where each |linear| term changes sign
+    double best_t = 0.0;
+    double best_f = f(0.0);
 
-    // Areal displacement = area of the two "cut-off" triangles in the
-    // symmetric difference between old polyline A→B→C→D and new A→E→D.
-    double disp = std::abs(tri_signed_area(A->x, A->y, B->x, B->y, B->ex, B->ey))
-                + std::abs(tri_signed_area(C->x, C->y, D->x, D->y, B->ex, B->ey));
+    if (std::abs(k1) > 1e-12) {
+        double tb = -c1 / k1;
+        double fb = f(tb);
+        if (fb < best_f) { best_f = fb; best_t = tb; }
+    }
+    if (std::abs(k2) > 1e-12) {
+        double tb = -c2 / k2;
+        double fb = f(tb);
+        if (fb < best_f) { best_f = fb; best_t = tb; }
+    }
 
-    B->areal_displacement = disp;
+    B->ex = e0x + best_t * tx;
+    B->ey = e0y + best_t * ty;
+    B->areal_displacement = best_f;
     return true;
 }
 
