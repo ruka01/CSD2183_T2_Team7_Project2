@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Polygon Before/After Viewer</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#0f0f11; --surface:#18181c; --border:#2a2a32;
+      --accent:#c8f135; --dim:#555566; --text:#e8e8f0;
+      --muted:#888899; --before:#4da9ff; --after:#ff6b6b;
+    }
+    body { background:var(--bg); color:var(--text); font-family:'DM Mono',monospace; min-height:100vh; display:flex; flex-direction:column; }
+    header { padding:28px 40px 20px; border-bottom:1px solid var(--border); display:flex; align-items:baseline; gap:16px; }
+    header h1 { font-family:'Syne',sans-serif; font-size:1.5rem; font-weight:800; letter-spacing:-0.02em; color:var(--accent); }
+    header span { font-size:0.75rem; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; }
+    #statusBar { padding:12px 40px; background:var(--surface); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:24px; font-size:0.75rem; color:var(--muted); flex-wrap:wrap; }
+    .stat { display:flex; gap:6px; align-items:center; }
+    .stat .label { color:var(--dim); } .stat .val { color:var(--text); font-weight:500; }
+    .dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    main { flex:1; display:grid; grid-template-columns:1fr 1fr; }
+    .panel { display:flex; flex-direction:column; padding:24px; gap:12px; }
+    .panel:first-child { border-right:1px solid var(--border); }
+    .panel-header { display:flex; align-items:center; gap:10px; }
+    .panel-header .dot { width:8px; height:8px; }
+    .panel-header h2 { font-family:'Syne',sans-serif; font-size:0.85rem; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; }
+    .vcount { margin-left:auto; font-size:0.7rem; color:var(--muted); }
+    .vcount span { color:var(--text); }
+    canvas { width:100%; aspect-ratio:1; background:var(--surface); border:1px solid var(--border); border-radius:6px; display:block; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>POLY/SIMP</h1>
+  <span>Polygon Simplifier &mdash; Before / After</span>
+  <span style="margin-left:auto; color:var(--accent); opacity:0.7; font-size:0.7rem;">input_blob_with_two_holes.csv</span>
+</header>
+<div id="statusBar">
+  <div class="stat"><div class="dot" style="background:var(--before)"></div>
+    <span class="label">before</span><span class="val" id="statBefore">-</span></div>
+  <div class="stat"><div class="dot" style="background:var(--after)"></div>
+    <span class="label">after</span><span class="val" id="statAfter">-</span></div>
+  <div class="stat"><span class="label">reduction</span><span class="val" id="statReduction">-</span></div>
+</div>
+<main>
+  <div class="panel">
+    <div class="panel-header">
+      <div class="dot" style="background:var(--before)"></div>
+      <h2>Before</h2><span class="vcount">vertices: <span id="vcBefore">-</span></span>
+    </div>
+    <canvas id="beforeCanvas" width="800" height="800"></canvas>
+  </div>
+  <div class="panel">
+    <div class="panel-header">
+      <div class="dot" style="background:var(--after)"></div>
+      <h2>After</h2><span class="vcount">vertices: <span id="vcAfter">-</span></span>
+    </div>
+    <canvas id="afterCanvas" width="800" height="800"></canvas>
+  </div>
+</main>
+<script>
+const INPUT_CSV  = `ring_id,vertex_id,x,y
+0,0,0,0
+0,1,200,-50
+0,2,400,0
+0,3,600,-30
+0,4,800,0
+0,5,1000,50
+0,6,1200,0
+0,7,1250,200
+0,8,1200,400
+0,9,1250,600
+0,10,1100,750
+0,11,900,850
+0,12,700,900
+0,13,500,1000
+0,14,300,950
+0,15,150,800
+0,16,50,650
+0,17,0,500
+0,18,-50,300
+0,19,0,150
+1,0,200,200
+1,1,200,350
+1,2,300,450
+1,3,450,400
+1,4,450,300
+1,5,400,200
+1,6,300,150
+2,0,700,300
+2,1,750,350
+2,2,850,500
+2,3,950,650
+2,4,1000,600
+2,5,1050,450
+2,6,1000,350
+2,7,900,250
+2,8,800,200
+`;
+const OUTPUT_CSV = `ring_id,vertex_id,x,y
+0,0,37.5826,-52.8329
+0,1,400,0
+0,2,628.571,-34.2857
+0,3,1000,50
+0,4,1250,-12.5
+0,5,1193.96,729.997
+0,6,385.399,1014.87
+0,7,50,678.571
+0,8,-50,300
+1,0,200,143.75
+1,1,200,430
+1,2,450,400
+1,3,428.571,214.286
+2,0,708.333,291.667
+2,1,964.356,671.287
+2,2,1058.51,428.013
+2,3,820.299,179.701
+`;
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const rings = {};
+  for (let i = 1; i < lines.length; i++) {
+    const p = lines[i].split(',');
+    if (p.length < 4) continue;
+    const id = parseInt(p[0],10), x = parseFloat(p[2]), y = parseFloat(p[3]);
+    if (isNaN(id)||isNaN(x)||isNaN(y)) continue;
+    if (!rings[id]) rings[id] = [];
+    rings[id].push({x, y});
+  }
+  return rings;
+}
+function countVerts(r) { return Object.values(r).reduce((s,a)=>s+a.length,0); }
+function getBounds(sets) {
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const rings of sets)
+    for (const ring of Object.values(rings))
+      for (const p of ring) {
+        if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x;
+        if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y;
+      }
+  if(!isFinite(minX)){minX=minY=0;maxX=maxY=1;}
+  return {minX,minY,maxX,maxY};
+}
+function drawPanel(id, rings, bounds, color) {
+  const canvas=document.getElementById(id), ctx=canvas.getContext('2d');
+  const W=canvas.width, H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const pad=50, w=Math.max(bounds.maxX-bounds.minX,1e-9), h=Math.max(bounds.maxY-bounds.minY,1e-9);
+  const scale=Math.min((W-2*pad)/w,(H-2*pad)/h);
+  const mp=p=>({x:pad+(p.x-bounds.minX)*scale, y:H-(pad+(p.y-bounds.minY)*scale)});
+  const ids=Object.keys(rings).map(Number).sort((a,b)=>a-b);
+  ctx.save(); ctx.beginPath();
+  for (const rid of ids) {
+    const ring=rings[rid]; if(!ring.length) continue;
+    const s=mp(ring[0]); ctx.moveTo(s.x,s.y);
+    for(let i=1;i<ring.length;i++){const m=mp(ring[i]);ctx.lineTo(m.x,m.y);}
+    ctx.closePath();
+  }
+  ctx.fillStyle=color+'18'; ctx.fill('evenodd'); ctx.restore();
+  for(let idx=0;idx<ids.length;idx++){
+    const ring=rings[ids[idx]]; if(!ring.length) continue;
+    const ec=idx===0?color:'#ff9f43';
+    ctx.beginPath();
+    for(let i=0;i<ring.length;i++){const m=mp(ring[i]);i===0?ctx.moveTo(m.x,m.y):ctx.lineTo(m.x,m.y);}
+    ctx.closePath(); ctx.strokeStyle=ec; ctx.lineWidth=idx===0?2:1.5; ctx.stroke();
+    for(const p of ring){
+      const m=mp(p); ctx.beginPath(); ctx.arc(m.x,m.y,idx===0?3.5:3,0,Math.PI*2);
+      ctx.fillStyle=ec; ctx.fill();
+    }
+  }
+}
+const br=parseCSV(INPUT_CSV), ar=parseCSV(OUTPUT_CSV);
+const bounds=getBounds([br,ar]);
+drawPanel('beforeCanvas',br,bounds,'#4da9ff');
+drawPanel('afterCanvas', ar,bounds,'#ff6b6b');
+const nb=countVerts(br), na=countVerts(ar);
+document.getElementById('statBefore').textContent=nb;
+document.getElementById('statAfter').textContent=na;
+document.getElementById('vcBefore').textContent=nb;
+document.getElementById('vcAfter').textContent=na;
+document.getElementById('statReduction').textContent=(((nb-na)/nb)*100).toFixed(1)+'%';
+</script>
+</body>
+</html>
