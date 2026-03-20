@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Polygon Before/After Viewer</title>
+  <style>
+    body { font-family: Arial, sans-serif; }
+    .row { display: flex; gap: 20px; }
+    .panel { display: flex; flex-direction: column; align-items: center; }
+    canvas { border: 1px solid black; }
+  </style>
+</head>
+<body>
+  <h2>Polygon Before / After Comparison</h2>
+
+  <div>
+    <label>Before CSV: <input type="file" id="beforeFile" /></label>
+    <label style="margin-left:20px;">After CSV: <input type="file" id="afterFile" /></label>
+  </div>
+
+  <br>
+
+  <div class="row">
+    <div class="panel">
+      <h3>Before</h3>
+      <canvas id="beforeCanvas" width="600" height="600"></canvas>
+    </div>
+
+    <div class="panel">
+      <h3>After</h3>
+      <canvas id="afterCanvas" width="600" height="600"></canvas>
+    </div>
+  </div>
+
+  <script>
+    let beforeRings = null;
+    let afterRings = null;
+
+    document.getElementById("beforeFile").addEventListener("change", e => {
+      loadCSV(e.target.files[0], rings => {
+        beforeRings = rings;
+        redraw();
+      });
+    });
+
+    document.getElementById("afterFile").addEventListener("change", e => {
+      loadCSV(e.target.files[0], rings => {
+        afterRings = rings;
+        redraw();
+      });
+    });
+
+    function loadCSV(file, callback) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function() {
+        callback(parseCSV(reader.result));
+      };
+      reader.readAsText(file);
+    }
+
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/);
+      const rings = {};
+      for (let i = 1; i < lines.length; ++i) {
+        const parts = lines[i].split(",");
+        if (parts.length < 4) continue;
+        const ringId = parseInt(parts[0], 10);
+        const x = parseFloat(parts[2]);
+        const y = parseFloat(parts[3]);
+        if (!rings[ringId]) rings[ringId] = [];
+        rings[ringId].push({ x, y });
+      }
+      return rings;
+    }
+
+    function getBounds(allRingSets) {
+      let minX = Infinity, minY = Infinity;
+      let maxX = -Infinity, maxY = -Infinity;
+
+      for (const rings of allRingSets) {
+        if (!rings) continue;
+        for (const ring of Object.values(rings)) {
+          for (const p of ring) {
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x);
+            maxY = Math.max(maxY, p.y);
+          }
+        }
+      }
+
+      if (!isFinite(minX)) {
+        minX = minY = 0;
+        maxX = maxY = 1;
+      }
+
+      return { minX, minY, maxX, maxY };
+    }
+
+    function redraw() {
+      const bounds = getBounds([beforeRings, afterRings]);
+      draw("beforeCanvas", beforeRings, bounds);
+      draw("afterCanvas", afterRings, bounds);
+    }
+
+    function draw(canvasId, rings, bounds) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!rings) return;
+
+      const pad = 40;
+      const width = Math.max(bounds.maxX - bounds.minX, 1e-9);
+      const height = Math.max(bounds.maxY - bounds.minY, 1e-9);
+      const scale = Math.min(
+        (canvas.width - 2 * pad) / width,
+        (canvas.height - 2 * pad) / height
+      );
+
+      function mapPoint(p) {
+        return {
+          x: pad + (p.x - bounds.minX) * scale,
+          y: canvas.height - (pad + (p.y - bounds.minY) * scale)
+        };
+      }
+
+      const ringIds = Object.keys(rings).map(Number).sort((a, b) => a - b);
+
+      for (let idx = 0; idx < ringIds.length; ++idx) {
+        const ring = rings[ringIds[idx]];
+        if (ring.length === 0) continue;
+
+        ctx.beginPath();
+        for (let i = 0; i < ring.length; ++i) {
+          const m = mapPoint(ring[i]);
+          if (i === 0) ctx.moveTo(m.x, m.y);
+          else ctx.lineTo(m.x, m.y);
+        }
+        ctx.closePath();
+
+        ctx.strokeStyle = idx === 0 ? "blue" : "red";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        for (let i = 0; i < ring.length; ++i) {
+          const m = mapPoint(ring[i]);
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, 3, 0, Math.PI * 2);
+          ctx.fillStyle = "black";
+          ctx.fill();
+        }
+      }
+    }
+  </script>
+</body>
+</html>
